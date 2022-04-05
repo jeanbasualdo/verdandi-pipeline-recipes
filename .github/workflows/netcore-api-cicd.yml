@@ -22,7 +22,7 @@ on:
       dotnet_test_command:
         required: false
         type: string
-        default: dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=opencover /p:Threshold=70
+        default: dotnet test --logger trx /p:CollectCoverage=true /p:CoverletOutputFormat=opencover /p:Threshold=70
       nuget_template_path:
         required: false
         type: string
@@ -30,7 +30,7 @@ on:
       openapi_schema:
         required: false
         type: string
-        default: main.openapi.yaml      
+        default: main.openapi.yaml
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -59,6 +59,8 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           SECRET_NAME: ${{ inputs.internal_name }}@${{ github.ref }}
       - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
       - uses: addnab/docker-run-action@v3
         name: App - Check Secrets in Repository
         with:
@@ -75,12 +77,38 @@ jobs:
         env:
           OWNER: ${{ env.GITHUB_OWNER }}
           TOKEN: ${{ env.GITHUB_TOKEN }}
-      - name: App - Test and Coverage
+      - name: Set up JDK 11
+        uses: actions/setup-java@v1
+        with:
+          java-version: 1.11
+      - name: Cache SonarQube packages
+        uses: actions/cache@v1
+        with:
+          path: ~/sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+      - name: Cache SonarQube scanner
+        id: cache-sonar-scanner
+        uses: actions/cache@v1
+        with:
+          path: ./.sonar/scanner
+          key: ${{ runner.os }}-sonar-scanner
+          restore-keys: ${{ runner.os }}-sonar-scanner
+      - name: Install SonarQube scanner
+        if: steps.cache-sonar-scanner.outputs.cache-hit != 'true'
+        run: |
+          mkdir ./.sonar
+          mkdir ./.sonar/scanner
+          dotnet tool update dotnet-sonarscanner --tool-path ./.sonar/scanner
+      - name: App - Build, Test and Coverage
         run: |
           envsubst < "${{ inputs.nuget_template_path }}" > "nuget.config"
           dotnet restore
+
+          ./.sonar/scanner/dotnet-sonarscanner begin /k:"${{ env.SONAR_ID }}" /d:sonar.cs.opencover.reportsPaths="**/*.opencover.xml" /d:sonar.login="${{ env.SONAR_TOKEN }}" /d:sonar.host.url="${{ env.SONAR_HOST_URL }}" /d:sonar.cs.vstest.reportsPaths="**/*.trx"
           dotnet build --configuration Release
           eval "${{ inputs.dotnet_test_command }}"
+          ./.sonar/scanner/dotnet-sonarscanner end /d:sonar.login="${{ env.SONAR_TOKEN }}"
         env:
           OWNER: ${{ env.GITHUB_OWNER }}
           TOKEN: ${{ env.GITHUB_TOKEN }}
