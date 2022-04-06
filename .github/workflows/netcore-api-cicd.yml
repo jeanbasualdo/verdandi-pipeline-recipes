@@ -179,14 +179,16 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           SECRET_NAME: ${{ inputs.internal_name }}@${{ github.ref }}
       - uses: actions/checkout@v2
-      - name: App - Terraforming
+      - name: App - Load Version Number
         run: |
           echo "APP_VERSION=$(cat ${{ inputs.version_file }})" >> $GITHUB_ENV
+      - name: App - Terraforming
+        run: |
           cd ${{ inputs.terraform_folder }}
           eval `ssh-agent -s`
           ssh-add - <<< '${{ env.GITHUB_SSH_KEY }}'
           export TF_VAR_app_name=${{ inputs.internal_name }}
-          export TF_VAR_app_version=${{ env.APP_VERSION }}
+          export TF_VAR_app_version=$APP_VERSION
           export TF_VAR_environment=${{ env.ENVIRONMENT }}
           export TF_VAR_app_secret_name="${{ inputs.internal_name }}@${{ github.ref }}"
           terraform init -backend-config="bucket=${{ env.TERRAFORM_BUCKET }}" -backend-config="key=${{ inputs.internal_name }}/${{ env.ENVIRONMENT }}/terraform.tfstate"
