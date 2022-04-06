@@ -15,6 +15,10 @@ on:
       terraform_folder:
         required: true
         type: string
+      terraform_deploy_command:
+        required: false
+        type: string
+        default: apply
       version_file:
         required: false
         type: string
@@ -31,6 +35,18 @@ on:
         required: false
         type: string
         default: main.openapi.yaml
+      run_ci:
+        required: false
+        type: boolean
+        default: true
+      run_package:
+        required: false
+        type: boolean
+        default: true
+      run_deploy:
+        required: false
+        type: boolean
+        default: true
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -38,6 +54,7 @@ on:
         required: true
 jobs:
   ci:
+    if: always() && inputs.run_ci
     runs-on: ubuntu-latest
     steps:
       - name: Set up .NET Core
@@ -119,6 +136,7 @@ jobs:
   package:
     runs-on: ubuntu-latest
     needs: ci
+    if: always() && inputs.run_package
     steps:
       - name: Load Cluster Configuration
         uses: say8425/aws-secrets-manager-actions@v2
@@ -163,6 +181,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: package
+    if: always() && inputs.run_deploy
     steps:
       - name: Load Cluster Configuration
         uses: say8425/aws-secrets-manager-actions@v2
@@ -192,7 +211,7 @@ jobs:
           export TF_VAR_environment=${{ env.ENVIRONMENT }}
           export TF_VAR_app_secret_name="${{ inputs.internal_name }}@${{ github.ref }}"
           terraform init -backend-config="bucket=${{ env.TERRAFORM_BUCKET }}" -backend-config="key=${{ inputs.internal_name }}/${{ env.ENVIRONMENT }}/terraform.tfstate"
-          terraform apply -auto-approve -input=false
+          terraform ${{ inputs.terraform_deploy_command }} -auto-approve -input=false
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
