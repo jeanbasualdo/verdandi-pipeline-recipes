@@ -1,0 +1,73 @@
+name: .NET 5.0 CI - Package
+
+on:
+  workflow_call:
+    inputs:
+      internal_name:
+        required: true
+        type: string
+      infrastructure_secret_name:
+        required: true
+        type: string
+      version_file:
+        required: false
+        type: string
+        default: .version
+      nuget_template_path:
+        required: false
+        type: string
+        default: .nuget.config
+      openapi_schema:
+        required: false
+        type: string
+        default: main.openapi.yaml
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load Cluster Configuration
+        uses: say8425/aws-secrets-manager-actions@v2
+        with:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          SECRET_NAME: ${{ inputs.infrastructure_secret_name }}
+      - name: Load Instance Configuration
+        uses: say8425/aws-secrets-manager-actions@v2
+        with:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          SECRET_NAME: ${{ inputs.internal_name }}@${{ github.ref }}
+      - uses: actions/checkout@v2
+      - name: App - Load Version Number
+        run: |
+          echo "APP_VERSION=$(cat ${{ inputs.version_file }})" >> $GITHUB_ENV
+      - name: App - Update REST Schemas
+        run: |
+          aws s3 cp ${{ inputs.openapi_schema }} s3://${{ env.TERRAFORM_BUCKET }}/schemas/${{ inputs.internal_name }}/${{ env.ENVIRONMENT }}/main.openapi.yaml --acl public-read
+          aws s3 cp ${{ inputs.openapi_schema }} s3://${{ env.TERRAFORM_BUCKET }}/schemas/${{ inputs.internal_name }}/${{ env.ENVIRONMENT }}/${{ env.APP_VERSION }}/main.openapi.yaml --acl public-read
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: App - Build Image
+        run: |
+          envsubst < "${{ inputs.nuget_template_path }}" > "nuget.config"
+          docker build --tag "${{ env.IMAGE_SHORT_NAME }}:$APP_VERSION" .
+        env:
+          OWNER: ${{ env.GITHUB_OWNER }}
+          TOKEN: ${{ env.GITHUB_TOKEN }}
+      - name: App - Push to ECR
+        id: ecr
+        uses: jwalton/gh-ecr-push@v1
+        with:
+          access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          region: us-east-1
+          image: "${{ env.IMAGE_SHORT_NAME }}:${{ env.APP_VERSION }}"

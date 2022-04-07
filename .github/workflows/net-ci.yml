@@ -1,0 +1,110 @@
+name: .NET 5.0 CI - Build and Test
+
+on:
+  workflow_call:
+    inputs:
+      internal_name:
+        required: true
+        type: string
+      infrastructure_secret_name:
+        required: true
+        type: string
+      dotnet_test_command:
+        required: false
+        type: string
+        default: dotnet test --logger trx /p:CollectCoverage=true /p:CoverletOutputFormat=opencover /p:Threshold=70
+      nuget_template_path:
+        required: false
+        type: string
+        default: .nuget.config
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up .NET Core
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: 5.0.200
+      - name: Load Cluster Configuration
+        uses: say8425/aws-secrets-manager-actions@v2
+        with:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          SECRET_NAME: ${{ inputs.infrastructure_secret_name }}
+      - name: Load Instance Configuration
+        uses: say8425/aws-secrets-manager-actions@v2
+        with:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          SECRET_NAME: ${{ inputs.internal_name }}@${{ github.ref }}
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - uses: addnab/docker-run-action@v3
+        name: App - Check Secrets in Repository
+        with:
+          registry: gcr.io
+          image: zricethezav/gitleaks:latest
+          options: -v ${{ github.workspace }}:/path
+          run: |
+            gitleaks detect -v -s /path  --no-git
+      - name: App - Scan Dependencies for Security Issues
+        run: |
+          envsubst < "${{ inputs.nuget_template_path }}" > "nuget.config"
+          dotnet restore
+          dotnet list package --vulnerable --include-transitive
+          if (dotnet list package --vulnerable --include-transitive) | grep -q 'has the following vulnerable packages'; then
+            echo 'Code dependencies has vulnerabilities, please check output.'
+            exit 1;
+          fi
+
+          echo 'No vulnerable packages'
+        env:
+          OWNER: ${{ env.GITHUB_OWNER }}
+          TOKEN: ${{ env.GITHUB_TOKEN }}
+      - name: Set up JDK 11
+        uses: actions/setup-java@v1
+        with:
+          java-version: 1.11
+      - name: Cache SonarQube packages
+        uses: actions/cache@v1
+        with:
+          path: ~/sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+      - name: Cache SonarQube scanner
+        id: cache-sonar-scanner
+        uses: actions/cache@v1
+        with:
+          path: ./.sonar/scanner
+          key: ${{ runner.os }}-sonar-scanner
+          restore-keys: ${{ runner.os }}-sonar-scanner
+      - name: Install SonarQube scanner
+        if: steps.cache-sonar-scanner.outputs.cache-hit != 'true'
+        run: |
+          mkdir ./.sonar
+          mkdir ./.sonar/scanner
+          dotnet tool update dotnet-sonarscanner --tool-path ./.sonar/scanner
+      - name: App - Build, Test and Coverage
+        run: |
+          envsubst < "${{ inputs.nuget_template_path }}" > "nuget.config"
+          dotnet restore
+
+          ./.sonar/scanner/dotnet-sonarscanner begin /k:"${{ env.SONAR_ID }}" /d:sonar.cs.opencover.reportsPaths="**/*.opencover.xml" /d:sonar.login="${{ env.SONAR_TOKEN }}" /d:sonar.host.url="${{ env.SONAR_HOST_URL }}" /d:sonar.cs.vstest.reportsPaths="**/*.trx"
+          dotnet build --configuration Release
+          eval "${{ inputs.dotnet_test_command }}"
+          ./.sonar/scanner/dotnet-sonarscanner end /d:sonar.login="${{ env.SONAR_TOKEN }}"
+        env:
+          OWNER: ${{ env.GITHUB_OWNER }}
+          TOKEN: ${{ env.GITHUB_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_PROFILE: default
+          ACTIONS_ALLOW_UNSECURE_COMMANDS: true

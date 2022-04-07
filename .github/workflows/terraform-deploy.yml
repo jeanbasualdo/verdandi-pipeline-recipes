@@ -1,0 +1,66 @@
+name: Terraform Deploy
+
+on:
+  workflow_call:
+    inputs:
+      internal_name:
+        required: true
+        type: string
+      infrastructure_secret_name:
+        required: true
+        type: string
+      terraform_folder:
+        required: true
+        type: string
+      terraform_deploy_command:
+        required: false
+        type: string
+        default: apply
+      version_file:
+        required: false
+        type: string
+        default: .version
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load Cluster Configuration
+        uses: say8425/aws-secrets-manager-actions@v2
+        with:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          SECRET_NAME: ${{ inputs.infrastructure_secret_name }}
+      - name: Load Instance Configuration
+        uses: say8425/aws-secrets-manager-actions@v2
+        with:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          SECRET_NAME: ${{ inputs.internal_name }}@${{ github.ref }}
+      - uses: actions/checkout@v2
+      - name: App - Load Version Number
+        run: |
+          echo "APP_VERSION=$(cat ${{ inputs.version_file }})" >> $GITHUB_ENV
+      - name: App - Terraforming
+        run: |
+          cd ${{ inputs.terraform_folder }}
+          eval `ssh-agent -s`
+          ssh-add - <<< '${{ env.GITHUB_SSH_KEY }}'
+          export TF_VAR_app_name=${{ inputs.internal_name }}
+          export TF_VAR_app_version=$APP_VERSION
+          export TF_VAR_environment=${{ env.ENVIRONMENT }}
+          export TF_VAR_app_secret_name="${{ inputs.internal_name }}@${{ github.ref }}"
+          terraform init -backend-config="bucket=${{ env.TERRAFORM_BUCKET }}" -backend-config="key=${{ inputs.internal_name }}/${{ env.ENVIRONMENT }}/terraform.tfstate"
+          terraform ${{ inputs.terraform_deploy_command }} -auto-approve -input=false
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_SDK_LOAD_CONFIG: true
+          ACTIONS_ALLOW_UNSECURE_COMMANDS: true
