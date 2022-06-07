@@ -17,6 +17,10 @@ on:
         required: false
         type: string
         default: .nuget.config
+      use_sonarqube:
+        required: false
+        type: boolean
+        default: true
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -29,7 +33,7 @@ jobs:
       - name: Set up .NET Core
         uses: actions/setup-dotnet@v1
         with:
-          dotnet-version: 5.0.200
+          dotnet-version: 5.0.408
       - name: Load Cluster Configuration
         uses: say8425/aws-secrets-manager-actions@v2
         with:
@@ -97,10 +101,12 @@ jobs:
           envsubst < "${{ inputs.nuget_template_path }}" > "nuget.config"
           dotnet restore
 
-          ./.sonar/scanner/dotnet-sonarscanner begin /k:"${{ env.SONAR_ID }}" /d:sonar.cs.opencover.reportsPaths="**/*.opencover.xml" /d:sonar.login="${{ env.SONAR_TOKEN }}" /d:sonar.host.url="${{ env.SONAR_HOST_URL }}" /d:sonar.cs.vstest.reportsPaths="**/*.trx"
-          dotnet build --configuration Release
-          eval "${{ inputs.dotnet_test_command }}"
-          ./.sonar/scanner/dotnet-sonarscanner end /d:sonar.login="${{ env.SONAR_TOKEN }}"
+          if ${{ inputs.use_sonarqube }}; then
+            ./.sonar/scanner/dotnet-sonarscanner begin /k:"${{ env.SONAR_ID }}" /d:sonar.cs.opencover.reportsPaths="**/*.opencover.xml" /d:sonar.login="${{ env.SONAR_TOKEN }}" /d:sonar.host.url="${{ env.SONAR_HOST_URL }}" /d:sonar.cs.vstest.reportsPaths="**/*.trx"
+            dotnet build --configuration Release
+            eval "${{ inputs.dotnet_test_command }}"
+            ./.sonar/scanner/dotnet-sonarscanner end /d:sonar.login="${{ env.SONAR_TOKEN }}"
+          fi
         env:
           OWNER: ${{ env.GITHUB_OWNER }}
           TOKEN: ${{ env.GITHUB_TOKEN }}
