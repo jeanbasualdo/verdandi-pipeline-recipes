@@ -21,6 +21,10 @@ on:
         required: false
         type: string
         default: main.openapi.yaml
+      onprem_file:
+        required: false
+        type: string
+        default: ""
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -71,3 +75,12 @@ jobs:
           secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           region: us-east-1
           image: "${{ env.IMAGE_SHORT_NAME }}:${{ env.APP_VERSION }}"
+      - name: Update Onpremise Deployment
+        run: |
+          if ${{ inputs.onprem_file }}; then
+            envsubst < ${{ inputs.onprem_file }} > k8-deployment.yml
+            aws s3 cp k8-deployment.yml s3://${{ env.TERRAFORM_BUCKET }}/onprem/${{ inputs.internal_name }}/${{ env.ENVIRONMENT }}/k8-deployment.yml
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
