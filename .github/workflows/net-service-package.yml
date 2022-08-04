@@ -54,9 +54,11 @@ jobs:
         run: |
           echo "APP_VERSION=$(cat ${{ inputs.version_file }})" >> $GITHUB_ENV
       - name: App - Update REST Schemas
-        run: |
-          aws s3 cp ${{ inputs.openapi_schema }} s3://${{ env.TERRAFORM_BUCKET }}/schemas/${{ inputs.internal_name }}/${{ env.ENVIRONMENT }}/main.openapi.yaml --acl public-read
-          aws s3 cp ${{ inputs.openapi_schema }} s3://${{ env.TERRAFORM_BUCKET }}/schemas/${{ inputs.internal_name }}/${{ env.ENVIRONMENT }}/${{ env.APP_VERSION }}/main.openapi.yaml --acl public-read
+        run: |          
+          if [[ ! -z "${{ inputs.openapi_schema }}" ]]; then
+            aws s3 cp ${{ inputs.openapi_schema }} s3://${{ env.TERRAFORM_BUCKET }}/schemas/${{ inputs.internal_name }}/${{ env.ENVIRONMENT }}/main.openapi.yaml --acl public-read
+            aws s3 cp ${{ inputs.openapi_schema }} s3://${{ env.TERRAFORM_BUCKET }}/schemas/${{ inputs.internal_name }}/${{ env.ENVIRONMENT }}/${{ env.APP_VERSION }}/main.openapi.yaml --acl public-read
+          fi
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -77,7 +79,7 @@ jobs:
           image: "${{ env.IMAGE_SHORT_NAME }}:${{ env.APP_VERSION }}"
       - name: Update OnPrem Deployment
         run: |
-          if [[ ! -z ${{ inputs.onprem_file }} ]]; then
+          if [[ ! -z "${{ inputs.onprem_file }}" ]]; then
             envsubst < "${{ inputs.onprem_file }}" > "k8-deployment.yml"
             aws s3 cp k8-deployment.yml s3://${{ env.TERRAFORM_BUCKET }}/onprem/${{ inputs.internal_name }}/${{ env.ENVIRONMENT }}/k8-deployment.yml
           fi
